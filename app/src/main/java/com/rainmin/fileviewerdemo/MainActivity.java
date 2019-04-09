@@ -10,8 +10,7 @@ import com.rainmin.fileviewer.FileViewActivity;
 
 public class MainActivity extends AppCompatActivity {
 
-//    private final String filePath = "/storage/sdcard0/rainmin.docx";
-    private final String filePath = Environment.getExternalStorageDirectory().getPath() + "/documents/test.xlsx";
+    private final String filePath = Environment.getExternalStorageDirectory().getPath() + "/test.doc";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

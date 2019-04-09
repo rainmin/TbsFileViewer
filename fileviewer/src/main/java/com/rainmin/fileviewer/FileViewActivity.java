@@ -4,10 +4,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Message;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.MimeTypeMap;
 import android.widget.ProgressBar;
@@ -20,6 +23,7 @@ import com.tencent.smtt.sdk.TbsListener;
 import com.tencent.smtt.sdk.TbsReaderView;
 
 import java.io.File;
+import java.lang.ref.WeakReference;
 
 public class FileViewActivity extends AppCompatActivity implements TbsReaderView.ReaderCallback {
 
@@ -33,19 +37,14 @@ public class FileViewActivity extends AppCompatActivity implements TbsReaderView
     private TbsReaderView mTbsReaderView;
     private String mFilePath;
     private String mFileName;
+    private MyHandler mHandler;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_file_view);
-        initX5Environment();
-        initView();
         getFileUrlByIntent();
-        if (isLocalExist()) {
-            displayFile();
-        } else {
-            Toast.makeText(this, "文件不存在", Toast.LENGTH_SHORT).show();
-        }
+        initView();
     }
 
     @Override
@@ -57,13 +56,17 @@ public class FileViewActivity extends AppCompatActivity implements TbsReaderView
     }
 
     private void initView() {
+        if (mHandler == null) {
+            mHandler = new MyHandler(this);
+        }
         rlTbsView = findViewById(R.id.rl_tbsView);
         tvState = findViewById(R.id.tv_state);
         progressBar = findViewById(R.id.progressBar_download);
-        mTbsReaderView = new TbsReaderView(this, this);
-        rlTbsView.addView(mTbsReaderView, new RelativeLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
+        if (QbSdk.isTbsCoreInited()) {
+            initTbsReader();
+        } else {
+            initX5Environment();
+        }
     }
 
     @Override
@@ -135,6 +138,18 @@ public class FileViewActivity extends AppCompatActivity implements TbsReaderView
         return type;
     }
 
+    private void initTbsReader() {
+        mTbsReaderView = new TbsReaderView(this, this);
+        rlTbsView.addView(mTbsReaderView, new RelativeLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        if (isLocalExist()) {
+            displayFile();
+        } else {
+            Toast.makeText(this, "文件不存在", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void initX5Environment() {
         // 搜集本地tbs内核信息并上报服务器，服务器返回结果决定使用哪个内核
         QbSdk.PreInitCallback cb = new QbSdk.PreInitCallback() {
@@ -142,6 +157,15 @@ public class FileViewActivity extends AppCompatActivity implements TbsReaderView
             public void onViewInitFinished(boolean arg0) {
                 // x5内核初始化完成回调接口，可通过参数判断是否加载起来了x5内核
                 Log.d(TAG, " onViewInitFinished is " + arg0);
+                if (arg0) {
+                    Message msg = Message.obtain();
+                    msg.what = MyHandler.MSG_INIT_FINISH;
+                    mHandler.sendMessage(msg);
+                } else {
+                    Message msg = Message.obtain();
+                    msg.what = MyHandler.MSG_INIT_FAILED;
+                    mHandler.sendMessage(msg);
+                }
             }
 
             @Override
@@ -165,12 +189,54 @@ public class FileViewActivity extends AppCompatActivity implements TbsReaderView
             @Override
             public void onInstallFinish(int i) {
                 Log.d(TAG, "onInstallFinish");
+                Message msg = Message.obtain();
+                msg.what = MyHandler.MSG_INSTALL_FINISH;
+                mHandler.sendMessage(msg);
             }
 
             @Override
             public void onDownloadProgress(int i) {
                 Log.d(TAG, "onDownloadProgress:" + i);
+                Message msg = Message.obtain();
+                msg.what = MyHandler.MSG_PROGRESS;
+                msg.arg1 = i;
+                mHandler.sendMessage(msg);
             }
         });
+    }
+
+    private static class MyHandler extends Handler {
+        static final int MSG_PROGRESS = 15;
+        static final int MSG_INSTALL_FINISH = MSG_PROGRESS + 1;
+        static final int MSG_INIT_FINISH = MSG_PROGRESS + 2;
+        static final int MSG_INIT_FAILED = MSG_PROGRESS + 3;
+        WeakReference<FileViewActivity> mActivity;
+
+        MyHandler(FileViewActivity activity) {
+            mActivity = new WeakReference<>(activity);
+        }
+
+        @Override
+        public void handleMessage(Message msg) {
+            FileViewActivity activity = mActivity.get();
+            switch (msg.what) {
+                case MSG_PROGRESS:
+                    if (activity.progressBar.getVisibility() == View.GONE) {
+                        activity.progressBar.setVisibility(View.VISIBLE);
+                    }
+                    activity.progressBar.setProgress(msg.arg1);
+                    break;
+                case MSG_INSTALL_FINISH:
+                    activity.progressBar.setProgress(0);
+                    break;
+                case MSG_INIT_FINISH:
+                    activity.initTbsReader();
+                    break;
+                case MSG_INIT_FAILED:
+                    activity.tvState.setText("初始化x5内核失败");
+                    activity.progressBar.setVisibility(View.GONE);
+                    break;
+            }
+        }
     }
 }
